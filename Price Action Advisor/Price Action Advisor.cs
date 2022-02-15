@@ -1100,7 +1100,7 @@ namespace cAlgo.Robots
         /// <summary>
         /// La versione del prodotto, progressivo, utilie per controllare gli aggiornamenti se viene reso disponibile sul sito ctrader.guru
         /// </summary>
-        public const string VERSION = "1.0.2";
+        public const string VERSION = "1.0.3";
 
         #endregion
 
@@ -1127,7 +1127,7 @@ namespace cAlgo.Robots
         [Parameter("Period (bars)", Group = "Average", DefaultValue = 50, MinValue = 2)]
         public int AVGperiod { get; set; }
 
-        [Parameter("Minimum (pips; zero = all)", Group = "Average", DefaultValue = 15, MinValue = 0, Step = 0.1)]
+        [Parameter("Minimum (pips; zero = all)", Group = "Average", DefaultValue = 0, MinValue = 0, Step = 0.1)]
         public double AVGminimum { get; set; }
 
         [Parameter("Trading ?", Group = "Trading", DefaultValue = true)]
@@ -1546,14 +1546,15 @@ namespace cAlgo.Robots
             {
 
                 // --> Stampo a video le informazioni
-                string info = "\t" + string.Format("Average ({0} periods)\t{1} pips", AVGperiod, Symbol.DigitsToPips(AVG_Current).ToString("N2"));
-                info += "\r\n" + "\t" + string.Format("Current\t\t\t{0} pips", Symbol.DigitsToPips(AVG_Candle).ToString("N2"));
-                info += "\r\n" + "\t" + string.Format("Minimum\t\t{0} pips", AVGminimum.ToString("N2"));
-                info += "\r\n\r\n" + "\t" + string.Format("Is Allowed?\t\t{0}", (IsAllowed) ? "Yes" : "No");
-                info += "\r\n" + "\t" + string.Format("Triggering?\t\t{0}", (IsInTrigger) ? "Yes" : "No");
-                info += "\r\n\r\n" + "\t" + string.Format("Trading?\t\t\t{0}", (TradingEnabled) ? "On" : "Off");
-                info += "\r\n" + "\t" + string.Format("Recovery?\t\t{0}", (RecoveryEnabled) ? "On" : "Off");
-                info += "\r\n" + "\t" + string.Format("Alerts?\t\t\t{0}", (AlertsEnabled) ? "On" : "Off");
+                string info = string.Format( "\t{0} ({1})", NAME, VERSION );
+                info += string.Format("\r\n\r\n\tAverage ({0} periods)\t{1} pips", AVGperiod, Symbol.DigitsToPips(AVG_Current).ToString("N2"));
+                info += string.Format("\r\n\tCurrent\t\t\t{0} pips", Symbol.DigitsToPips(AVG_Candle).ToString("N2"));
+                info += string.Format("\r\n\tMinimum\t\t{0} pips", AVGminimum.ToString("N2"));
+                info += string.Format("\r\n\r\n\tIs Allowed?\t\t{0}", (IsAllowed) ? "Yes" : "No");
+                info += string.Format("\r\n\tTriggering?\t\t{0}", (IsInTrigger) ? "Yes" : "No");
+                info += string.Format("\r\n\r\n\tTrading?\t\t\t{0}", (TradingEnabled) ? "On" : "Off");
+                info += string.Format("\r\n\tRecovery?\t\t{0}", (RecoveryEnabled) ? "On" : "Off");
+                info += string.Format("\r\n\tAlerts?\t\t\t{0}", (AlertsEnabled) ? "On" : "Off");
 
                 ChartText ThisLabel = Chart.DrawText(NAME, info, Bars.OpenTimes.LastValue, Bars.OpenPrices.LastValue, Color.FromName(TextColor.ToString()));
                 ThisLabel.VerticalAlignment = VerticalAlignment.Center;
