@@ -1123,7 +1123,7 @@ namespace cAlgo.Robots
         /// <summary>
         /// La versione del prodotto, progressivo, utilie per controllare gli aggiornamenti se viene reso disponibile sul sito ctrader.guru
         /// </summary>
-        public const string VERSION = "1.0.6";
+        public const string VERSION = "1.0.7";
 
         #endregion
 
@@ -1175,6 +1175,9 @@ namespace cAlgo.Robots
 
         [Parameter("Trading ?", Group = "Trading", DefaultValue = true)]
         public bool TradingEnabled { get; set; }
+
+        [Parameter("SL/TP Enabled ?", Group = "Trading", DefaultValue = true)]
+        public bool SLTPEnabled { get; set; }
 
         [Parameter("Recovery ?", Group = "Trading", DefaultValue = true)]
         public bool RecoveryEnabled { get; set; }
@@ -1658,8 +1661,8 @@ namespace cAlgo.Robots
             IsAllowed = Bars.OpenPrices.LastValue == Bars.HighPrices.LastValue || Bars.OpenPrices.LastValue == Bars.LowPrices.LastValue;
             IsInTrigger = IsAllowed && Symbol.DigitsToPips(AVG_Current) >= AVGminimum && AVG_Candle >= AVG_Current;
 
-            SL = IsInTrigger ? Math.Round( Symbol.DigitsToPips(AVG_Current) + KSLTP, 1 ) : 0;
-            TP = IsInTrigger ? SL : 0;
+            SL = IsInTrigger && SLTPEnabled ? Math.Round( Symbol.DigitsToPips(AVG_Current) + KSLTP, 1 ) : 0;
+            TP = SL;
 
             // --> Creo la tabella informazioni
             if (CanDraw)
@@ -1888,7 +1891,7 @@ monitor.OpenedInThisTrigger = false;
             int index = MyLoopType == LoopType.OnBar ? 1 : 0;
 
             // --> Criteri da stabilire
-            return IsInTrigger && Bars.LastBar.IsBearish();
+            return true;
 
         }
 
@@ -1928,7 +1931,7 @@ monitor.OpenedInThisTrigger = false;
             int index = MyLoopType == LoopType.OnBar ? 1 : 0;
 
             // --> Criteri da stabilire
-            return false;
+            return IsInTrigger && Bars.LastBar.IsBearish();
 
         }
 
