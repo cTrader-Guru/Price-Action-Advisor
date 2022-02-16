@@ -16,6 +16,25 @@ using System.Windows.Forms;
 using cAlgo.API;
 using cAlgo.API.Internals;
 
+#region UPDATE : USING
+
+using System.Collections.Specialized;
+using System.Text.RegularExpressions;
+using System.Net;
+using System.Text;
+
+#endregion
+
+#region LICENZA : USING
+
+using NM_CTG_Licenza;
+using Button = cAlgo.API.Button;
+using System.Diagnostics;
+using System.IO;
+using Newtonsoft.Json;
+
+#endregion
+
 namespace cAlgo
 {
     /// <summary>
@@ -1091,6 +1110,10 @@ namespace cAlgo.Robots
         #endregion
 
         #region Identity
+        /// <summary>
+        /// ID prodotto, identificativo, viene fornito da ctrader.guru, 60886 è il riferimento del template in uso
+        /// </summary>
+        public const int ID = 213056;
 
         /// <summary>
         /// Nome del prodotto, identificativo, da modificare con il nome della propria creazione
@@ -1100,16 +1123,36 @@ namespace cAlgo.Robots
         /// <summary>
         /// La versione del prodotto, progressivo, utilie per controllare gli aggiornamenti se viene reso disponibile sul sito ctrader.guru
         /// </summary>
-        public const string VERSION = "1.0.3";
+        public const string VERSION = "1.0.4";
 
         #endregion
 
+        #region UPDATE : VARIABILI
+
+        private const string PRODUCTPAGE = "https://ctrader.guru/shop/tools/price-action-advisor/";
+        private const string LICENSEPAGE = "https://ctrader.guru/license/";
+
+        #endregion
+
+        #region LICENZA : VARIABILI
+
+        string productName = NAME;
+        readonly string endpoint = "https://ctrader.guru/_checkpoint_/";
+
+        DateTime licenzaExpire;
+        CL_CTG_Licenza licenza = null;
+        CL_CTG_Licenza.LicenzaInfo licenzaInfo = null;
+        bool exitoncalculate = false;
+        private ControlBase DrawingDialog = null;
+
+        #endregion
+        
         #region Params
 
         /// <summary>
         /// Riferimenti del prodotto
         /// </summary>
-        [Parameter(NAME + " " + VERSION, Group = "Identity", DefaultValue = "https://ctrader.guru/shop/cbots/price-action-advisor/")]
+        [Parameter(NAME + " " + VERSION, Group = "Identity", DefaultValue = PRODUCTPAGE)]
         public string ProductInfo { get; set; }
 
         /// <summary>
@@ -1336,6 +1379,30 @@ namespace cAlgo.Robots
             // --> Stampo nei log la versione corrente
             Print("{0} : {1}", NAME, VERSION);
 
+            #region LICENZA : INIT CHECK
+
+            CL_CTG_Licenza.LicenzaConfig licConfig = new CL_CTG_Licenza.LicenzaConfig
+            {
+                AccountBroker = Account.BrokerName,
+                AcconuntNumber = Account.Number.ToString()
+            };
+
+            licenza = new CL_CTG_Licenza(endpoint, licConfig, productName);
+
+            _checkLicense();
+
+            if (exitoncalculate)
+                return;
+
+            #endregion
+
+            #region UPDATE : INIT CHECK
+
+            _checkProductUpdate();
+
+            #endregion
+
+
             SafeLoss = (MyStopType == StopMode.Auto || SL > 0) ? StopLevel : 0;
             CanDraw = (RunningMode == RunningMode.RealTime || RunningMode == RunningMode.VisualBacktesting);
 
@@ -1427,6 +1494,56 @@ namespace cAlgo.Robots
         /// </summary>
         protected override void OnTick()
         {
+
+            #region LICENZA : LOOP CHECK                       
+
+            if (RunningMode == RunningMode.RealTime)
+            {
+
+                if (exitoncalculate)
+                {
+
+                    if (DrawingDialog != null && !DrawingDialog.IsVisible)
+                    {
+
+                        Stop();
+
+                    }
+                    else
+                    {
+
+                        _createButtonLogin();
+
+                    }
+
+                    return;
+
+                }
+                else if (licenzaExpire != null && licenzaInfo.Expire.CompareTo("*") != 0 && Monitor1.Positions.Length == 0)
+                {
+
+                    if (DateTime.Compare(licenzaExpire, Server.Time) > 0)
+                    {
+
+                        // --> TODO
+
+                    }
+                    else
+                    {
+
+                        exitoncalculate = true;
+
+                        Print("Expired (" + licenzaExpire + ")" + " (server : " + Server.Time.ToString() + ")");
+
+                        return;
+
+                    }
+
+                }
+
+            }
+
+            #endregion
 
             // --> Devo comunque controllare i breakeven e altro nel tick
             Monitor1.Update(_checkClosePositions(Monitor1), Monitor1.Info.IAmInHedging ? null : BreakEvenData1, Monitor1.Info.IAmInHedging ? null : TrailingData1, SafeLoss, null);
@@ -2009,6 +2126,597 @@ monitor.OpenedInThisTrigger = false;
 
         }
         #endregion
+
+        #region LICENZA & UPDATE : PRIVATE METHOD
+
+        // --> Versione modifica, originale in ScalFibo
+        private void _checkProductUpdate()
+        {
+
+            // --> Controllo solo se sono in realtime, evito le chiamate in backtest
+            if (RunningMode != RunningMode.RealTime)
+                return;
+
+            // --> Organizzo i dati per la richiesta degli aggiornamenti
+            Guru.API.RequestProductInfo Request = new Guru.API.RequestProductInfo
+            {
+
+                MyProduct = new Guru.Product
+                {
+
+                    ID = ID,
+                    Name = NAME,
+                    Version = VERSION
+
+                },
+                AccountBroker = Account.BrokerName,
+                AccountNumber = Account.Number
+
+            };
+
+            // --> Effettuo la richiesta
+            Guru.API Response = new Guru.API(Request);
+
+            // --> Controllo per prima cosa la presenza di errori di comunicazioni
+            if (Response.ProductInfo.Exception != "")
+            {
+
+                Print("{0} Exception : {1}", NAME, Response.ProductInfo.Exception);
+
+            }
+            // --> Chiedo conferma della presenza di nuovi aggiornamenti
+            else if (Response.HaveNewUpdate())
+            {
+
+                string updatemex = string.Format("{0} : Updates available {1} ( {2} )", NAME, Response.ProductInfo.LastProduct.Version, Response.ProductInfo.LastProduct.Updated);
+
+                // --> Informo l'utente con un messaggio sul grafico e nei log del cbot
+                Chart.DrawStaticText(NAME + "Updates", updatemex, VerticalAlignment.Top, cAlgo.API.HorizontalAlignment.Left, Extensions.ColorFromEnum(TextColor));
+                Print(updatemex);
+
+            }
+
+        }
+
+        private void _checkLicense(bool bypassread = false)
+        {
+
+            if (RunningMode != RunningMode.RealTime)
+                return;
+
+            try
+            {
+
+                // --> Controllo la licenza solo dal file
+                if (!bypassread)
+                    licenzaInfo = licenza.GetLicenzaFromFile();
+
+                // --> Se non ho il login chiedo di generarlo
+                if (!licenzaInfo.Login)
+                {
+
+                    _createButtonLogin();
+                    exitoncalculate = true;
+                    return;
+
+                }
+                else
+                {
+
+                    if (licenzaInfo.Product.CompareTo(productName.ToUpper()) != 0)
+                    {
+
+                        if (MessageBox.Show("Not for this product, remove cookie session?", "Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                            _removeCookieAndLicense(licenza);
+
+                        exitoncalculate = true;
+                        return;
+
+                    }
+                    else
+                    {
+
+                        if ((licenzaInfo.AccountBroker.CompareTo("*") != 0 && licenzaInfo.AccountBroker.CompareTo(Account.BrokerName) != 0) || (licenzaInfo.AccountNumber.CompareTo("*") != 0 && licenzaInfo.AccountNumber.CompareTo(Account.Number.ToString()) != 0))
+                        {
+
+                            if (MessageBox.Show("Not for this account, remove cookie session?", "Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                                _removeCookieAndLicense(licenza);
+
+                            exitoncalculate = true;
+                            return;
+
+                        }
+                        else
+                        {
+
+                            if (licenzaInfo.Expire == null || licenzaInfo.Expire.Length < 1)
+                            {
+
+                                if (MessageBox.Show("Expired, remove cookie session?", "Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                                    _removeCookieAndLicense(licenza);
+
+                                exitoncalculate = true;
+                                return;
+
+
+                            }
+                            else if (licenzaInfo.Expire.CompareTo("*") != 0)
+                            {
+
+                                try
+                                {
+
+                                    String[] substringsExpire = licenzaInfo.Expire.Split(',');
+
+                                    licenzaExpire = new DateTime(Int32.Parse(substringsExpire[0].Trim()), Int32.Parse(substringsExpire[1].Trim()), Int32.Parse(substringsExpire[2].Trim()), Int32.Parse(substringsExpire[3].Trim()), Int32.Parse(substringsExpire[4].Trim()), Int32.Parse(substringsExpire[5].Trim()));
+
+
+                                    if (DateTime.Compare(licenzaExpire, Server.Time) > 0)
+                                    {
+
+                                        Print("Expire : " + licenzaExpire.ToString() + " (server : " + Server.Time.ToString() + ")");
+                                        exitoncalculate = false;
+
+                                    }
+                                    else
+                                    {
+
+                                        if (MessageBox.Show("Expired (" + licenzaExpire + "), remove cookie session?", "Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                                            _removeCookieAndLicense(licenza);
+
+                                        exitoncalculate = true;
+                                        return;
+
+                                    }
+
+                                }
+                                catch
+                                {
+
+                                    if (MessageBox.Show("Expired, remove cookie session?", "Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                                        _removeCookieAndLicense(licenza);
+
+                                    exitoncalculate = true;
+                                    return;
+
+                                }
+
+                            }
+                            else
+                            {
+
+                                Print("Lifetime");
+                                exitoncalculate = false;
+
+                            }
+
+                        }
+
+                    }
+
+                }
+
+            }
+            catch (Exception exp)
+            {
+
+                MessageBox.Show("Encryption issue, contact support@ctrader.guru", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                licenza.RemoveLicense();
+                exitoncalculate = true;
+
+                Print("Debug : " + exp.Message);
+
+                return;
+
+            }
+
+        }
+
+        private void _createButtonLogin()
+        {
+
+            if (RunningMode != RunningMode.RealTime)
+                return;
+
+            if (DrawingDialog != null)
+            {
+
+                DrawingDialog.IsVisible = true;
+                return;
+
+            }
+
+            StackPanel stackPanel = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = API.HorizontalAlignment.Center,
+                Orientation = API.Orientation.Vertical,
+                IsVisible = false,
+                Width = 200,
+                BackgroundColor = Color.Red,
+                Margin = new Thickness(10, 10, 10, 10)
+            };
+
+            Button btnLogin = new Button
+            {
+                Text = "CTRADER GURU - LOGIN",
+                BackgroundColor = Color.Red,
+                ForegroundColor = Color.White,
+                Top = 10,
+                CornerRadius = 0,
+                HorizontalContentAlignment = API.HorizontalAlignment.Center
+
+            };
+            btnLogin.Click += delegate
+            {
+
+                if (!exitoncalculate)
+                    return;
+
+                DrawingDialog.IsVisible = false;
+                System.Windows.Forms.Application.DoEvents();
+
+                try
+                {
+
+
+                    _createLicense();
+
+                    OnStart();
+                    OnTick();
+
+                    DrawingDialog.IsVisible = false;
+                    System.Windows.Forms.Application.DoEvents();
+
+                }
+                catch
+                {
+                }
+
+
+            };
+
+            stackPanel.AddChild(btnLogin);
+
+            DrawingDialog = stackPanel;
+            Chart.AddControl(DrawingDialog);
+
+            DrawingDialog.IsVisible = true;
+
+        }
+
+        private void _createLicense()
+        {
+
+            if (RunningMode != RunningMode.RealTime)
+                return;
+
+            // --> Chiedo al server con i cookie, ma prima tento il recupero dal file
+            licenzaInfo = licenza.GetLicenzaFromFile();
+
+            if (licenzaInfo.ErrorProc == -2000)
+            {
+
+                MessageBox.Show("Waiting");
+                return;
+            }
+
+            if (!licenzaInfo.Login || licenzaInfo.ErrorProc != 1000)
+                licenzaInfo = licenza.GetLicenzaFromServer();
+
+            // --> Ci sono problemi con i cookie
+            if (licenzaInfo.ErrorProc == 2 || licenzaInfo.ErrorProc == 3 || licenzaInfo.Login == false)
+            {
+                // --> Rimuovo i cookie comunque
+                licenza.RemoveCookie();
+                licenza.RemoveLicense();
+
+
+                // --> Li rigenero chiedendo il login, faccio attenzione ad altri processi
+                Process[] processlist = Process.GetProcesses();
+                bool finded = false;
+
+                foreach (Process process in processlist)
+                {
+
+                    if (!String.IsNullOrEmpty(process.MainWindowTitle) && process.MainWindowTitle.ToUpper().CompareTo("CTRADER GURU - LOGIN") == 0)
+                    {
+
+                        finded = true;
+                        break;
+
+                    }
+
+                }
+
+                if (!finded)
+                {
+
+
+                    frmLogin LoginForm = new frmLogin(Account.BrokerName, Account.Number.ToString());
+                    LoginForm.FormClosed += delegate
+                    {
+
+                        licenzaInfo = licenza.GetLicenzaFromServer();
+                        _checkLicense();
+
+                    };
+
+                    LoginForm.ShowDialog();
+
+                }
+                else
+                {
+
+                    _alertChart("Others are logging in, waiting...");
+                }
+
+                exitoncalculate = true;
+
+            }
+            else
+            {
+
+                _checkLicense(true);
+
+            }
+
+        }
+
+        private void _removeCookieAndLicense(CL_CTG_Licenza licenza)
+        {
+
+            licenza.RemoveCookie();
+            licenza.RemoveLicense();
+
+        }
+
+        private void _alertChart(string mymex, bool withPrint = true)
+        {
+
+            if (RunningMode != RunningMode.RealTime)
+                return;
+
+            string mex = string.Format("{0} : {1}", NAME.ToUpper(), mymex);
+
+            Chart.DrawStaticText("alert", mex, VerticalAlignment.Center, API.HorizontalAlignment.Center, Color.Red);
+            if (withPrint)
+                Print(mex);
+
+        }
+
+        #endregion
+
+    }
+
+}
+
+/// <summary>
+/// NameSpace che racchiude tutte le feature ctrader.guru
+/// </summary>
+namespace Guru
+{
+    /// <summary>
+    /// Classe che definisce lo standard identificativo del prodotto nel marketplace ctrader.guru
+    /// </summary>
+    public class Product
+    {
+
+        public int ID = 0;
+        public string Name = "";
+        public string Version = "";
+        public string Updated = "";
+        public string LastCheck = "";
+
+    }
+
+    /// <summary>
+    /// Offre la possibilità di utilizzare le API messe a disposizione da ctrader.guru per verificare gli aggiornamenti del prodotto.
+    /// Permessi utente "AccessRights = AccessRights.FullAccess" per accedere a internet ed utilizzare JSON
+    /// </summary>
+    public class API
+    {
+        /// <summary>
+        /// Costante da non modificare, corrisponde alla pagina dei servizi API
+        /// </summary>
+        private const string Service = "https://ctrader.guru/api/product_info/";
+
+        private static string MainPath = string.Format("{0}\\cAlgo\\cTraderGuru\\", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+        private readonly string InfoFile = string.Format("{0}update", MainPath);
+
+        /// <summary>
+        /// Costante da non modificare, utilizzata per filtrare le richieste
+        /// </summary>
+        private const string UserAgent = "cTrader Guru";
+
+        /// <summary>
+        /// Variabile dove verranno inserite le direttive per la richiesta
+        /// </summary>
+        private RequestProductInfo RequestProduct = new RequestProductInfo();
+
+        /// <summary>
+        /// Variabile dove verranno inserite le informazioni identificative dal server dopo l'inizializzazione della classe API
+        /// </summary>
+        public ResponseProductInfo ProductInfo = new ResponseProductInfo();
+
+        /// <summary>
+        /// Classe che formalizza i parametri di richiesta, vengono inviate le informazioni del prodotto e di profilazione a fini statistici
+        /// </summary>
+        public class RequestProductInfo
+        {
+
+            /// <summary>
+            /// Il prodotto corrente per il quale richiediamo le informazioni
+            /// </summary>
+            public Product MyProduct = new Product();
+
+            /// <summary>
+            /// Broker con il quale effettiamo la richiesta
+            /// </summary>
+            public string AccountBroker = "";
+
+            /// <summary>
+            /// Il numero di conto con il quale chiediamo le informazioni
+            /// </summary>
+            public int AccountNumber = 0;
+
+        }
+
+        /// <summary>
+        /// Classe che formalizza lo standard per identificare le informazioni del prodotto
+        /// </summary>
+        public class ResponseProductInfo
+        {
+
+            /// <summary>
+            /// Il prodotto corrente per il quale vengono fornite le informazioni
+            /// </summary>
+            public Product LastProduct = new Product();
+
+            /// <summary>
+            /// Eccezioni in fase di richiesta al server, da utilizzare per controllare l'esito della comunicazione
+            /// </summary>
+            public string Exception = "";
+
+            /// <summary>
+            /// La risposta del server
+            /// </summary>
+            public string Source = "";
+
+        }
+
+        /// <summary>
+        /// Richiede le informazioni del prodotto richiesto
+        /// </summary>
+        /// <param name="Request"></param>
+        public API(RequestProductInfo Request)
+        {
+
+            RequestProduct = Request;
+
+            // --> Non controllo se non ho l'ID del prodotto
+            if (Request.MyProduct.ID <= 0)
+                return;
+
+            string cleanedproduct = string.Join("-", Request.MyProduct.Name.Split(default(string[]), StringSplitOptions.RemoveEmptyEntries));
+            string fileToCheck = InfoFile + "-" + cleanedproduct.ToUpper() + ".json";
+
+            // --> Controllo che siano passati almeno 30minuti tra una richiesta e l'altra
+            try
+            {
+
+                string infodata = File.ReadAllText(fileToCheck);
+
+                Product infolocal = JsonConvert.DeserializeObject<Product>(infodata);
+
+                if (infolocal.LastCheck != "" && infolocal.ID == Request.MyProduct.ID)
+                {
+
+                    DateTime timeToTrigger = DateTime.Parse(infolocal.LastCheck).AddMinutes(60);
+
+                    // --> Controllo se ci sono le condizioni per procedere
+                    if (DateTime.Compare(timeToTrigger, DateTime.Now) > 0)
+                    {
+
+                        ProductInfo.LastProduct = infolocal;
+                        return;
+
+                    }
+
+                }
+
+            }
+            catch
+            {
+
+            }
+
+            // --> Dobbiamo supervisionare la chiamata per registrare l'eccexione
+            try
+            {
+
+                // --> Strutturo le informazioni per la richiesta POST
+                NameValueCollection data = new NameValueCollection
+                {
+                    {
+                        "account_broker",
+                        Request.AccountBroker
+                    },
+                    {
+                        "account_number",
+                        Request.AccountNumber.ToString()
+                    },
+                    {
+                        "my_version",
+                        Request.MyProduct.Version
+                    },
+                    {
+                        "productid",
+                        Request.MyProduct.ID.ToString()
+                    }
+                };
+
+                // --> Autorizzo tutte le pagine di questo dominio
+                Uri myuri = new Uri(Service);
+                string pattern = string.Format("{0}://{1}/.*", myuri.Scheme, myuri.Host);
+
+                Regex urlRegEx = new Regex(pattern);
+                WebPermission p = new WebPermission(NetworkAccess.Connect, urlRegEx);
+                p.Assert();
+
+                // --> Protocollo di sicurezza https://
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)192 | (SecurityProtocolType)768 | (SecurityProtocolType)3072;
+
+                // -->> Richiedo le informazioni al server
+                using (var wb = new WebClient())
+                {
+
+                    wb.Headers.Add("User-Agent", UserAgent);
+
+                    var response = wb.UploadValues(myuri, "POST", data);
+                    ProductInfo.Source = Encoding.UTF8.GetString(response);
+
+                }
+
+                // -->>> Nel cBot necessita l'attivazione di "AccessRights = AccessRights.FullAccess"
+                ProductInfo.LastProduct = JsonConvert.DeserializeObject<Product>(ProductInfo.Source);
+                ProductInfo.LastProduct.LastCheck = DateTime.Now.ToString();
+
+                // --> Aggiorno il file locale
+                try
+                {
+
+                    Directory.CreateDirectory(MainPath);
+
+                    File.WriteAllText(fileToCheck, JsonConvert.SerializeObject(ProductInfo.LastProduct));
+
+                }
+                catch
+                {
+                }
+
+            }
+            catch (Exception Exp)
+            {
+
+                // --> Qualcosa è andato storto, registro l'eccezione
+                ProductInfo.Exception = Exp.Message;
+
+            }
+
+        }
+
+        /// <summary>
+        /// Esegue un confronto tra le versioni per determinare la presenza di aggiornamenti
+        /// </summary>
+        /// <returns></returns>
+        public bool HaveNewUpdate()
+        {
+
+            // --> Voglio essere sicuro che stiamo lavorando con le informazioni giuste
+            return (ProductInfo.LastProduct.ID == RequestProduct.MyProduct.ID && ProductInfo.LastProduct.Version != "" && RequestProduct.MyProduct.Version != "" && ProductInfo.LastProduct.Version != null && new Version(RequestProduct.MyProduct.Version).CompareTo(new Version(ProductInfo.LastProduct.Version)) < 0);
+
+        }
 
     }
 
