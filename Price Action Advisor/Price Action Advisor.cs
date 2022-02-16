@@ -1123,7 +1123,7 @@ namespace cAlgo.Robots
         /// <summary>
         /// La versione del prodotto, progressivo, utilie per controllare gli aggiornamenti se viene reso disponibile sul sito ctrader.guru
         /// </summary>
-        public const string VERSION = "1.0.5";
+        public const string VERSION = "1.0.6";
 
         #endregion
 
@@ -1178,6 +1178,9 @@ namespace cAlgo.Robots
 
         [Parameter("Recovery ?", Group = "Trading", DefaultValue = true)]
         public bool RecoveryEnabled { get; set; }
+
+        [Parameter("K + SL/TP (pips)", Group = "Trading", DefaultValue = 1.5, MinValue = 0 , Step = 0.1)]
+        public double KSLTP { get; set; }
 
         [Parameter("Activated ?", Group = "Alerts", DefaultValue = true)]
         public bool AlertsEnabled { get; set; }
@@ -1655,8 +1658,8 @@ namespace cAlgo.Robots
             IsAllowed = Bars.OpenPrices.LastValue == Bars.HighPrices.LastValue || Bars.OpenPrices.LastValue == Bars.LowPrices.LastValue;
             IsInTrigger = IsAllowed && Symbol.DigitsToPips(AVG_Current) >= AVGminimum && AVG_Candle >= AVG_Current;
 
-            SL = IsInTrigger ? Symbol.DigitsToPips(AVG_Current) : 0;
-            TP = IsInTrigger ? Symbol.DigitsToPips(AVG_Current) : 0;
+            SL = IsInTrigger ? Math.Round( Symbol.DigitsToPips(AVG_Current) + KSLTP, 1 ) : 0;
+            TP = IsInTrigger ? SL : 0;
 
             // --> Creo la tabella informazioni
             if (CanDraw)
