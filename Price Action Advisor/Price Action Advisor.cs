@@ -12,9 +12,9 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Windows.Forms;
 using cAlgo.API;
 using cAlgo.API.Internals;
+using cTrader.Guru.Extensions;
 
 
 namespace cAlgo
@@ -933,7 +933,7 @@ namespace cAlgo.Robots
 
         public const string NAME = "Price Action Advisor";
 
-        public const string VERSION = "1.0.8";
+        public const string VERSION = "1.0.9";
 
         #endregion
 
@@ -951,7 +951,7 @@ namespace cAlgo.Robots
         [Parameter("Period (bars)", Group = "Average", DefaultValue = 50, MinValue = 2)]
         public int AVGperiod { get; set; }
 
-        [Parameter("Minimum (pips; zero = all)", Group = "Average", DefaultValue = 0, MinValue = 0, Step = 0.1)]
+        [Parameter("Minimum (pips; zero = all)", Group = "Average", DefaultValue = 15, MinValue = 0, Step = 0.1)]
         public double AVGminimum { get; set; }
 
         [Parameter("Trading ?", Group = "Trading", DefaultValue = true)]
@@ -1035,6 +1035,27 @@ namespace cAlgo.Robots
 
         [Parameter("Pause under this time", Group = "Filters", DefaultValue = 0, MinValue = 0, MaxValue = 23.59)]
         public double PauseUnder { get; set; }
+
+
+        public bool IAmInPause
+        {
+
+            get
+            {
+
+                if (PauseOver == 0 && PauseUnder == 0)
+                    return false;
+
+                double now = Server.Time.ToDouble();
+
+                bool intraday = (PauseOver < PauseUnder && now >= PauseOver && now <= PauseUnder);
+                bool overnight = (PauseOver > PauseUnder && ((now >= PauseOver && now <= 23.59) || now <= PauseUnder));
+
+                return intraday || overnight;
+
+            }
+        }
+
 
         [Parameter("Max GAP Allowed (pips)", Group = "Filters", DefaultValue = 3, MinValue = 0, Step = 0.01)]
         public double GAP { get; set; }
@@ -1370,7 +1391,7 @@ namespace cAlgo.Robots
                 if (RunningMode == RunningMode.RealTime && AlertsEnabled)
                 {
 
-                    new Thread(new ThreadStart(delegate { MessageBox.Show(mex, NAME, MessageBoxButtons.OK, MessageBoxIcon.Information); })).Start();
+                    new Thread(new ThreadStart(delegate { MessageBox.Show(mex, NAME, MessageBoxButton.OK, MessageBoxImage.Information); })).Start();
 
                 }
 
@@ -1400,7 +1421,7 @@ namespace cAlgo.Robots
 
             CheckResetTrigger(monitor);
 
-            bool sharedCondition = (TradingEnabled && CanCowork(monitor) && !monitor.OpenedInThisBar && !monitor.OpenedInThisTrigger && !monitor.InGAP(GAP) && !monitor.InPause(Server.Time) && monitor.Symbol.RealSpread() <= SpreadToTrigger && monitor.Positions.Length < MaxTrades);
+            bool sharedCondition = (TradingEnabled && CanCowork(monitor) && !monitor.OpenedInThisBar && !monitor.OpenedInThisTrigger && !monitor.InGAP(GAP) && !IAmInPause && monitor.Symbol.RealSpread() <= SpreadToTrigger && monitor.Positions.Length < MaxTrades);
 
             bool triggerBuy = CalculateLongTrigger(CalculateLongFilter(sharedCondition));
             bool triggerSell = CalculateShortTrigger(CalculateShortFilter(sharedCondition));
@@ -1420,7 +1441,6 @@ namespace cAlgo.Robots
 
             double tmpSL = SL;
             double tmpTP = TP;
-
             if (MyOpenTradeType != Extensions.OpenTradeType.Sell && triggerBuy)
             {
 
